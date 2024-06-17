@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Radar Chart Example</title>
+    <!-- Inclua a biblioteca D3.js -->
+    <script src="https://d3js.org/d3.v6.min.js"></script>
+    <style>
+        .tooltip {
+            position: absolute;
+            text-align: center;
+            width: 120px;
+            height: auto;
+            padding: 8px;
+            font: 12px sans-serif;
+            background: lightsteelblue;
+            border: 0px;
+            border-radius: 8px;
+            pointer-events: none;
+            opacity: 0;
+        }
+        .chart-container {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            margin: 20px;
+        }
+    </style>
+</head>
+<body>
+    <h2>Gráficos de Radar - Análise de Ataques DDoS</h2>
+    <p>Os gráficos de radar apresentados abaixo visualizam as conexões de rede para os três principais IPs de origem em termos de volume de dados. Cada gráfico de radar representa um IP de origem específico e mostra a distribuição dos pacotes de dados enviados para diferentes IPs de destino. Esses gráficos são úteis para identificar padrões de tráfego e detectar possíveis comportamentos anômalos associados a ataques DDoS.</p>
+    <!-- Contêineres para os gráficos de radar -->
+    <div class="chart-container" id="radar-chart-1"></div>
+    <div class="chart-container" id="radar-chart-2"></div>
+    <div class="chart-container" id="radar-chart-3"></div>
+    <div class="tooltip"></div>
+
+    <!-- Inclusão do script JavaScript -->
+    <script>
+        // URL do CSV
+        const csvUrl = "https://raw.githubusercontent.com/flaviamoa/CTU-13/main/full_capture20110818_preprocessed_flavia.csv";
+
+        // Função para carregar e processar os dados
+        async function loadData() {
+            const data = await d3.csv(csvUrl);
+            
+            // Converter frame_len e tcp.time_delta para números
+            data.forEach(d => {
+                d['frame_len'] = +d['frame_len'];
+                d['tcp_time_delta'] = +d['tcp_time_delta'];
+            });
+
+            // Encontrar os 3 IPs de origem com o maior número de entradas
+            const ipCounts = d3.rollup(data, v => v.length, d => d['ip_src']);
+            const topIps = Array.from(ipCounts.entries())
+                                .sort((a, b) => d3.descending(a[1], b[1]))
+                                .slice(0, 3)
+                                .map(d => d[0]);
+
+            // Filtrar os dados para os 3 IPs principais
+            const filteredData = data.filter(d => topIps.includes(d['ip_src']));
+            
+            // Reduzir a quantidade de dados para agilizar o carregamento
+            const sampledData = filteredData.filter((d, i) => i % 10 === 0);
+            
+            return { sampledData, topIps };
+        }
+
+        // Função para criar o gráfico de radar
+        function createRadarChart(data, selector, ip) {
+            const width = 800;  // Ajustar a largura para 800px
+            const height = 800; // Ajustar a altura para 800px
+            const centerX = width / 2;
+            const centerY = height / 2;
+            const maxRadius = Math.min(width, height) / 2 - 40;
+
+            // Escala de cores para os IPs de destino
+            const colorScale = d3.scaleOrdinal(d3.schemeCategory10)
+                                 .domain(data.map(d => d['ip_dst']));
+
+            // Crie um SVG para o gráfico
+            const svg = d3.select(selector)
+                .append("svg")
+                .attr("width", width)
+                .attr("height", height)
+                .append("g")
+                .attr("transform", `translate(${centerX},${centerY})`);
+
+            // Adicione título
+            svg.append("text")
+                .attr("x", 0)
+                .attr("y", -maxRadius - 20)
+                .attr("text-anchor", "middle")
+                .style("font-size", "24px") // Aumente o tamanho do texto para 24px
+                .text(`Radar Chart for ${ip}`);
+
+            // Adicione eixos
+            const axis = svg.append("g").attr("class", "axis");
+            axis.selectAll("line")
+                .data(data)
+                .enter()
+                .append("line")
+                .attr("x1", 0)
+                .attr("y1", 0)
+                .attr("x2", d => maxRadius * Math.cos(getAngle(d['ip_dst'])))
+                .attr("y2", d => maxRadius * Math.sin(getAngle(d['ip_dst'])))
+                .style("stroke", "#ddd");
+
+            // Adicione os raios com cores consistentes
+            const rays = svg.append("g").attr("class", "rays");
+            rays.selectAll("line")
+                .data(data)
+                .enter()
+                .append("line")
+                .attr("x1", 0)
+                .attr("y1", 0)
+                .attr("x2", d => (maxRadius * d['frame_len'] / getMaxFrameLen(data)) * Math.cos(getAngle(d['ip_dst'])))
+                .attr("y2", d => (maxRadius * d['frame_len'] / getMaxFrameLen(data)) * Math.sin(getAngle(d['ip_dst'])))
+                .style("stroke", d => colorScale(d['ip_dst']))
+                .style("stroke-width", 2) // Ajuste a largura das linhas para 2
+                .on("mouseover", function(event, d) {
+                    d3.select(".tooltip")
+                        .style("opacity", 1)
+                        .html(`IP: ${d['ip_dst']}<br>Frame Length: ${d['frame_len']}<br>Time Delta: ${d['tcp_time_delta']}`)
+                        .style("left", (event.pageX + 5) + "px")
+                        .style("top", (event.pageY - 28) + "px");
+                })
+                .on("mouseout", function() {
+                    d3.select(".tooltip")
+                        .style("opacity", 0);
+                });
+        }
+
+        // Função para calcular o ângulo baseado no IP de destino
+        function getAngle(ip) {
+            if (!ip) {
+                return 0; // Retorna 0 para IPs malformados ou ausentes
+            }
+            const parts = ip.split('.').map(d => +d);
+            if (parts.length !== 4 || parts.some(isNaN)) {
+                return 0;  // Retorna 0 para IPs malformados
+            }
+            const total = parts.reduce((acc, val) => acc + val, 0);
+            return (total % 360) * (Math.PI / 180);
+        }
+
+        // Função para obter o comprimento máximo do quadro
+        function getMaxFrameLen(data) {
+            return d3.max(data, d => d['frame_len']);
+        }
+
+        // Carregar os dados e criar os gráficos
+        loadData().then(({ sampledData, topIps }) => {
+            topIps.forEach((ip, index) => {
+                const ipData = sampledData.filter(d => d['ip_src'] === ip);
+                createRadarChart(ipData, `#radar-chart-${index + 1}`, ip);
+            });
+        }).catch(error => {
+            console.error('Error loading or processing data:', error);
+        });
+    </script>
+</body>
+</html>

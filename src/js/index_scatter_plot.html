@@ -1,0 +1,183 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Scatter Plot - DDoS Attack Analysis</title>
+    <!-- Inclua a biblioteca D3.js -->
+    <script src="https://d3js.org/d3.v6.min.js"></script>
+    <style>
+        .chart-container {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            margin: 20px;
+        }
+        .tooltip {
+            position: absolute;
+            text-align: center;
+            width: 150px;
+            height: auto;
+            padding: 8px;
+            font: 12px sans-serif;
+            background: lightsteelblue;
+            border: 0px;
+            border-radius: 8px;
+            pointer-events: none;
+            opacity: 0;
+        }
+        .dot {
+            fill: rgba(75, 192, 192);
+        }
+        .dot:hover {
+            fill: orange;
+        }
+        .x-axis text,
+        .y-axis text {
+            font-size: 12px;
+        }
+    </style>
+</head>
+<body>
+    <h2>Scatter Plot - Análise de Ataques DDoS</h2>
+    <p>O gráfico de dispersão (scatter plot) apresentado abaixo tem como objetivo visualizar a distribuição do tráfego de rede entre diferentes endereços IP de destino (ip_dst) e o comprimento dos quadros (frame_len). <br />
+
+    1- Eixo X (IP de Destino):<br />
+
+    - Representa os endereços IP de destino (ip_dst), convertidos para valores numéricos. Cada ponto ao longo do eixo x corresponde a um IP de destino específico.<br />
+
+    2- Eixo Y (Comprimento do Quadro):<br />
+
+    - Representa o comprimento dos quadros (frame_len), que indica o tamanho dos pacotes de dados recebidos. Valores maiores no eixo y indicam pacotes de dados maiores.<br />
+
+    3- Pontos de Dispersão:<br />
+
+    - Cada ponto no gráfico representa um pacote de dados enviado para um endereço IP de destino específico.<br />
+    - A posição horizontal do ponto é determinada pelo IP de destino, enquanto a posição vertical é determinada pelo comprimento do quadro.<br />
+
+    </p>
+
+    <!-- Contêiner para o gráfico de dispersão -->
+    <div class="chart-container">
+        <div id="scatter-plot"></div>
+    </div>
+    <div class="tooltip"></div>
+
+    <!-- Inclusão do script JavaScript -->
+    <script>
+        // URL do CSV
+        const csvUrl = "https://raw.githubusercontent.com/flaviamoa/CTU-13/main/full_capture20110818_preprocessed_flavia.csv";
+
+        // Função para carregar e processar os dados
+        async function loadData() {
+            const data = await d3.csv(csvUrl);
+
+            // Converter frame_len para número
+            data.forEach(d => {
+                d['frame_len'] = +d['frame_len'];
+                d['ip_dst'] = d['ip_dst'];
+                // Converter ip_dst para um valor numérico
+                d['ip_dst_numeric'] = ipToNumeric(d['ip_dst']);
+            });
+
+            return data;
+        }
+
+        // Função para converter IP para valor numérico
+        function ipToNumeric(ip) {
+            return ip.split('.').reduce((acc, part) => acc * 256 + +part, 0);
+        }
+
+        // Função para criar o gráfico de dispersão
+        function createScatterPlot(data) {
+            const margin = { top: 20, right: 30, bottom: 50, left: 60 };
+            const width = 960 - margin.left - margin.right;
+            const height = 500 - margin.top - margin.bottom;
+
+            const svg = d3.select("#scatter-plot")
+                .append("svg")
+                .attr("width", width + margin.left + margin.right)
+                .attr("height", height + margin.top + margin.bottom)
+                .append("g")
+                .attr("transform", `translate(${margin.left},${margin.top})`);
+
+            // Escalas
+            const x = d3.scaleLinear()
+                .domain(d3.extent(data, d => d['ip_dst_numeric']))
+                .nice()
+                .range([0, width]);
+
+            const y = d3.scaleLinear()
+                .domain([0, d3.max(data, d => d['frame_len'])])
+                .nice()
+                .range([height, 0]);
+
+            // Eixos
+            /*const xAxis = d3.axisBottom(x)
+                .tickFormat(d => {
+                    const ip = [
+                        (d >>> 24) & 255,
+                        (d >>> 16) & 255,
+                        (d >>> 8) & 255,
+                        d & 255
+                    ];
+                    return ip.join('.');
+                });*/
+
+            const xAxis = d3.axisBottom(x).ticks(0);  // Remove os rótulos dos ticks no eixo x
+
+            const yAxis = d3.axisLeft(y);
+
+            svg.append("g")
+                .attr("class", "x-axis")
+                .attr("transform", `translate(0,${height})`)
+                .call(xAxis)
+                /*.append("text")
+                .attr("class", "axis-label")
+                .attr("x", width)
+                .attr("y", -10)
+                .style("text-anchor", "end")
+                .style("font-size", "12px")
+                .text("IP de Destino");*/
+
+            svg.append("g")
+                .attr("class", "y-axis")
+                .call(yAxis)
+                .append("text")
+                .attr("class", "axis-label")
+                .attr("x", -10)
+                .attr("y", 10)
+                .attr("transform", "rotate(-90)")
+                .style("text-anchor", "end")
+                .style("font-size", "12px")
+                .text("Comprimento do Quadro");
+
+            // Tooltip
+            const tooltip = d3.select(".tooltip");
+
+            // Pontos de dispersão
+            svg.selectAll(".dot")
+                .data(data)
+                .enter().append("circle")
+                .attr("class", "dot")
+                .attr("cx", d => x(d['ip_dst_numeric']))
+                .attr("cy", d => y(d['frame_len']))
+                .attr("r", 3)
+                .on("mouseover", function(event, d) {
+                    tooltip.style("opacity", 1)
+                           .html(`IP Origem: ${d['ip_src']}<br>IP Destino: ${d['ip_dst']}<br>Comprimento do Quadro: ${d['frame_len']}<br>Timestamp: ${d['frame_time']}`)
+                           .style("left", (event.pageX + 5) + "px")
+                           .style("top", (event.pageY - 28) + "px");
+                })
+                .on("mouseout", function() {
+                    tooltip.style("opacity", 0);
+                });
+        }
+
+        // Carregar os dados e criar o gráfico
+        loadData().then(createScatterPlot).catch(error => {
+            console.error('Error loading or processing data:', error);
+        });
+    </script>
+</body>
+</html>

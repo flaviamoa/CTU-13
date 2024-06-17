@@ -1,0 +1,159 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Timeline Line Chart</title>
+    <!-- Inclua a biblioteca D3.js -->
+    <script src="https://d3js.org/d3.v6.min.js"></script>
+    <style>
+        .chart-container {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            margin: 20px;
+        }
+        .tooltip {
+            position: absolute;
+            text-align: center;
+            width: 120px;
+            height: auto;
+            padding: 8px;
+            font: 12px sans-serif;
+            background: lightsteelblue;
+            border: 0px;
+            border-radius: 8px;
+            pointer-events: none;
+            opacity: 0;
+        }
+        .dot {
+            fill: rgba(75, 192, 192);
+        }
+        .dot:hover {
+            fill: orange;
+        }
+        .x-axis text,
+        .y-axis text {
+            font-size: 12px;
+        }
+    </style>
+</head>
+<body>
+    <h2>Gráfico de Linha do Tempo - Análise de Ataques DDoS</h2>
+    <p>O gráfico de linha do tempo apresentado abaixo é projetado para visualizar a distribuição do comprimento dos quadros de dados ao longo do tempo. Este gráfico é uma ferramenta eficaz para identificar padrões de tráfego e possíveis anomalias que podem estar associadas a ataques DDoS.</p>
+    <!-- Contêiner para o gráfico de linha -->
+    <div class="chart-container">
+        <div id="line-chart"></div>
+    </div>
+    <div class="tooltip"></div>
+
+    <!-- Inclusão do script JavaScript -->
+    <script>
+        // URL do CSV
+        const csvUrl = "https://raw.githubusercontent.com/flaviamoa/CTU-13/main/full_capture20110818_preprocessed_flavia.csv";
+
+        // Função para carregar e processar os dados
+        async function loadData() {
+            const data = await d3.csv(csvUrl);
+            
+            // Converter frame_time para objeto Date em UTC e frame_len para número
+            data.forEach(d => {
+                d['frame_time'] = new Date(d['frame_time'] + 'Z'); // Adiciona 'Z' para indicar UTC
+                d['frame_len'] = +d['frame_len'];
+            });
+
+            // Ordenar os dados por frame_time
+            data.sort((a, b) => a['frame_time'] - b['frame_time']);
+
+            // Calcular o acumulado do frame_len
+            let cumulativeLength = 0;
+            data.forEach(d => {
+                if (!isNaN(d['frame_len'])) {
+                    cumulativeLength += d['frame_len'];
+                }
+                d['cumulative_frame_len'] = cumulativeLength;
+            });
+
+            // Normalizar os dados usando Min-Max Normalization
+            const maxCumulativeLength = d3.max(data, d => d['cumulative_frame_len']);
+            const minCumulativeLength = d3.min(data, d => d['cumulative_frame_len']);
+            
+            data.forEach(d => {
+                d['normalized_cumulative_frame_len'] = (d['cumulative_frame_len'] - minCumulativeLength) / (maxCumulativeLength - minCumulativeLength);
+            });
+
+            return data;
+        }
+
+        // Função para criar o gráfico de linha
+        function createLineChart(data) {
+            const margin = { top: 20, right: 30, bottom: 30, left: 40 };
+            const width = 960 - margin.left - margin.right;
+            const height = 500 - margin.top - margin.bottom;
+
+            const x = d3.scaleTime()
+                .domain(d3.extent(data, d => d['frame_time']))
+                .range([0, width]);
+
+            const y = d3.scaleLinear()
+                .domain([0, 1])
+                .range([height, 0]);
+
+            const xAxis = d3.axisBottom(x);
+            const yAxis = d3.axisLeft(y);
+
+            const line = d3.line()
+                .x(d => x(d['frame_time']))
+                .y(d => y(d['normalized_cumulative_frame_len']))
+                .curve(d3.curveMonotoneX); // Suaviza a linha
+
+            const svg = d3.select("#line-chart")
+                .append("svg")
+                .attr("width", width + margin.left + margin.right)
+                .attr("height", height + margin.top + margin.bottom)
+                .append("g")
+                .attr("transform", `translate(${margin.left},${margin.top})`);
+
+            svg.append("g")
+                .attr("transform", `translate(0,${height})`)
+                .call(xAxis);
+
+            svg.append("g")
+                .call(yAxis);
+
+            svg.append("path")
+                .datum(data)
+                .attr("fill", "none")
+                .attr("stroke", "steelblue")
+                .attr("stroke-width", 1.5)
+                .attr("d", line);
+
+            // Tooltip
+            const tooltip = d3.select(".tooltip");
+
+            svg.selectAll("circle")
+                .data(data)
+                .enter()
+                .append("circle")
+                .attr("cx", d => x(d['frame_time']))
+                .attr("cy", d => y(d['normalized_cumulative_frame_len']))
+                .attr("r", 3)
+                .attr("fill", "rgba(75, 192, 192)")
+                .on("mouseover", function(event, d) {
+                    tooltip.style("opacity", 1)
+                           .html(`Time: ${d['frame_time'].toISOString()}<br>Cumulative Length: ${d['cumulative_frame_len']}`)
+                           .style("left", (event.pageX + 5) + "px")
+                           .style("top", (event.pageY - 28) + "px");
+                })
+                .on("mouseout", function() {
+                    tooltip.style("opacity", 0);
+                });
+        }
+
+        // Carregar os dados e criar o gráfico
+        loadData().then(createLineChart).catch(error => {
+            console.error('Error loading or processing data:', error);
+        });
+    </script>
+</body>
+</html>

@@ -1,0 +1,174 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Bar Charts - IP Analysis</title>
+    <!-- Inclua a biblioteca D3.js -->
+    <script src="https://d3js.org/d3.v6.min.js"></script>
+    <style>
+        .chart-container {
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            margin: 20px;
+        }
+        .tooltip {
+            position: absolute;
+            text-align: center;
+            width: 120px;
+            height: auto;
+            padding: 8px;
+            font: 12px sans-serif;
+            background: lightsteelblue;
+            border: 0px;
+            border-radius: 8px;
+            pointer-events: none;
+            opacity: 0;
+        }
+        .bar {
+            fill: rgba(75, 192, 192);
+        }
+        .bar:hover {
+            fill: orange;
+        }
+        .x-axis text {
+            font-size: 12px;
+        }
+    </style>
+</head>
+<body>
+    <h1>IP Analysis - DDoS Attack</h1>
+
+    <h2>IPs que enviam as maiores mensagens</h2>
+    <p>O gráfico de barras abaixo mostra os 15 IPs de origem que enviam as maiores mensagens (frame_len), ordenados do maior para o menor. Os valores do eixo y são normalizados para o intervalo [0, 100] para tornar os valores mais amigáveis. A interatividade é adicionada para mostrar detalhes ao passar o mouse sobre as barras. A intenção é identificar quais IPs mandam mensagens maiores, pois ele podem ser candidatos à IPs da Botnet atacante.</p>
+    <div class="chart-container">
+        <div id="bar-chart-src"></div>
+    </div>
+    <div class="tooltip"></div>
+
+    <h2>IPs que recebem as maiores mensagens</h2>
+    <p>O gráfico de barras abaixo mostra os 15 IPs de destino que recebem as maiores mensagens (frame_len), ordenados do maior para o menor. Os valores do eixo y são normalizados para o intervalo [0, 100] para tornar os valores mais amigáveis. A interatividade é adicionada para mostrar detalhes ao passar o mouse sobre as barras. A intenção é identificar quais IPs recebem mensagens maiores, pois eles podem ser os alvos dos ataques DDoS.</p>
+    <div class="chart-container">
+        <div id="bar-chart-dst"></div>
+    </div>
+    <div class="tooltip"></div>
+
+    <!-- Inclusão do script JavaScript -->
+    <script>
+        // URL do CSV
+        const csvUrl = "https://raw.githubusercontent.com/flaviamoa/CTU-13/main/full_capture20110818_preprocessed_flavia.csv";
+
+        // Função para carregar e processar os dados
+        async function loadData() {
+            const data = await d3.csv(csvUrl);
+
+            // Converter frame_len para número
+            data.forEach(d => {
+                d['frame_len'] = +d['frame_len'];
+            });
+
+            // Agrupar os dados por ip_src e somar os frame_len
+            const srcData = Array.from(d3.rollup(
+                data,
+                v => d3.sum(v, d => d['frame_len']),
+                d => d['ip_src']
+            ), ([key, value]) => ({ key, value }));
+
+            // Agrupar os dados por ip_dst e somar os frame_len
+            const dstData = Array.from(d3.rollup(
+                data,
+                v => d3.sum(v, d => d['frame_len']),
+                d => d['ip_dst']
+            ), ([key, value]) => ({ key, value }));
+
+            // Ordenar os dados pelo frame_len total, do maior para o menor
+            srcData.sort((a, b) => d3.descending(a.value, b.value));
+            dstData.sort((a, b) => d3.descending(a.value, b.value));
+
+            // Filtrar para manter apenas os 15 primeiros IPs
+            const top15SrcData = srcData.slice(0, 15);
+            const top15DstData = dstData.slice(0, 15);
+
+            return { top15SrcData, top15DstData };
+        }
+
+        // Função para criar o gráfico de barras
+        function createBarChart(data, selector) {
+            const margin = { top: 20, right: 30, bottom: 80, left: 40 };  // Aumentar a margem inferior
+            const width = 960 - margin.left - margin.right;
+            const height = 500 - margin.top - margin.bottom;
+
+            // Normalização dos dados para o intervalo [0, 100]
+            const maxVal = d3.max(data, d => d.value);
+            const minVal = d3.min(data, d => d.value);
+            data.forEach(d => {
+                d.normalizedValue = ((d.value - minVal) / (maxVal - minVal)) * 100;
+            });
+
+            const x = d3.scaleBand()
+                .domain(data.map(d => d.key))
+                .range([0, width])
+                .padding(0.1);
+
+            const y = d3.scaleLinear()
+                .domain([0, 100])
+                .nice()
+                .range([height, 0]);
+
+            const xAxis = d3.axisBottom(x);
+            const yAxis = d3.axisLeft(y);
+
+            const svg = d3.select(selector)
+                .append("svg")
+                .attr("width", width + margin.left + margin.right)
+                .attr("height", height + margin.top + margin.bottom)
+                .append("g")
+                .attr("transform", `translate(${margin.left},${margin.top})`);
+
+            svg.append("g")
+                .attr("class", "x-axis")
+                .attr("transform", `translate(0,${height})`)
+                .call(xAxis)
+                .selectAll("text")
+                .attr("transform", "rotate(-45)")
+                .style("text-anchor", "end")
+                .style("font-size", "12px");  // Reduzir o tamanho da fonte
+
+            svg.append("g")
+                .attr("class", "y-axis")
+                .call(yAxis);
+
+            svg.selectAll(".bar")
+                .data(data)
+                .enter()
+                .append("rect")
+                .attr("class", "bar")
+                .attr("x", d => x(d.key))
+                .attr("y", d => y(d.normalizedValue))
+                .attr("width", x.bandwidth())
+                .attr("height", d => height - y(d.normalizedValue))
+                .on("mouseover", function(event, d) {
+                    d3.select(".tooltip")
+                        .style("opacity", 1)
+                        .html(`IP: ${d.key}<br>Frame Length: ${d.value}`)
+                        .style("left", (event.pageX + 5) + "px")
+                        .style("top", (event.pageY - 28) + "px");
+                })
+                .on("mouseout", function() {
+                    d3.select(".tooltip")
+                        .style("opacity", 0);
+                });
+        }
+
+        // Carregar os dados e criar os gráficos
+        loadData().then(({ top15SrcData, top15DstData }) => {
+            createBarChart(top15SrcData, "#bar-chart-src");
+            createBarChart(top15DstData, "#bar-chart-dst");
+        }).catch(error => {
+            console.error('Error loading or processing data:', error);
+        });
+    </script>
+</body>
+</html>
